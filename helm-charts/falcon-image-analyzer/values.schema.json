@@ -311,36 +311,6 @@
                 "properties": {
                     "global": {
                         "properties": {
-                            "falcon": {
-                                "properties": {
-                                    "cid": {
-                                        "const": null
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "then": {
-                "properties": {
-                    "crowdstrikeConfig": {
-                        "type": "object",
-                        "required": ["cid"],
-                        "properties": {
-                            "cid": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "if": {
-                "properties": {
-                    "global": {
-                        "properties": {
                             "falconSecret": {
                                 "properties": {
                                     "secretName": {
@@ -371,6 +341,9 @@
                                         },
                                         "clientSecret": {
                                             "pattern": "^[a-zA-Z0-9]{40}$"
+                                        },
+                                        "cid": {
+                                            "pattern": "^[0-9a-fA-F]{32}-[0-9a-fA-F]{2}$"
                                         }
                                     }
                                 }
