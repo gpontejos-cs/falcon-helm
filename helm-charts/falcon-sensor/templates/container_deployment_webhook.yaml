@@ -98,7 +98,6 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
-        allowPrivilegeEscalation: false
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.container.image.pullSecrets.enable }}
@@ -143,8 +142,11 @@ spec:
         imagePullPolicy: "{{ .Values.container.image.pullPolicy }}"
         command: ["injector"]
         securityContext:
+          allowPrivilegeEscalation: false
+          {{- if (include "falcon-sensor.openshiftEnabled" . | eq "false") }}
           runAsUser: 1234
           runAsGroup: 1234
+          {{- end }}
         envFrom:
         - configMapRef:
             name: {{ include "falcon-sensor.configMapName" . }}
