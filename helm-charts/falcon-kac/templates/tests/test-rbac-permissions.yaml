@@ -1,0 +1,96 @@
+{{- if .Values.testing.enabled -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "falcon-kac.fullname" . }}-test-rbac-permissions"
+  namespace: {{ include "falcon-kac.namespace" . }}
+  labels:
+    {{- include "falcon-kac.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: kubectl
+      image: docker.io/bitnami/kubectl
+      command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Testing RBAC configuration for falcon-kac..."
+
+        echo "Checking if ServiceAccount exists..."
+        SA=$(kubectl get serviceaccount {{ .Values.serviceAccount.name }} -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${SA}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ServiceAccount '{{ .Values.serviceAccount.name }}' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ServiceAccount exists"
+
+        echo "Checking if ClusterRole exists..."
+        CR=$(kubectl get clusterrole {{ include "falcon-kac.fullname" . }} -o name 2>/dev/null)
+        if [ -z "${CR}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ClusterRole '{{ include "falcon-kac.fullname" . }}' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ClusterRole exists"
+
+        echo "Checking if ClusterRoleBinding exists..."
+        CRB=$(kubectl get clusterrolebinding {{ include "falcon-kac.fullname" . }} -o name 2>/dev/null)
+        if [ -z "${CRB}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ClusterRoleBinding '{{ include "falcon-kac.fullname" . }}' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ClusterRoleBinding exists"
+
+        echo "Verifying ClusterRoleBinding is correctly linked to ServiceAccount..."
+        BINDING_SA=$(kubectl get clusterrolebinding {{ include "falcon-kac.fullname" . }} -o jsonpath='{.subjects[?(@.kind=="ServiceAccount")].name}')
+        if [ "${BINDING_SA}" != "{{ .Values.serviceAccount.name }}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ClusterRoleBinding not correctly linked to ServiceAccount. Expected: {{ .Values.serviceAccount.name }}, Got: ${BINDING_SA}"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ClusterRoleBinding correctly linked to ServiceAccount"
+
+        echo "Verifying ClusterRoleBinding is correctly linked to ClusterRole..."
+        BINDING_ROLE=$(kubectl get clusterrolebinding {{ include "falcon-kac.fullname" . }} -o jsonpath='{.roleRef.name}')
+        if [ "${BINDING_ROLE}" != "{{ include "falcon-kac.fullname" . }}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ClusterRoleBinding not correctly linked to ClusterRole. Expected: {{ include "falcon-kac.fullname" . }}, Got: ${BINDING_ROLE}"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ClusterRoleBinding correctly linked to ClusterRole"
+
+        echo "Testing basic permissions using service account..."
+        # Test if the service account can perform basic operations it needs
+        kubectl auth can-i get nodes --as=system:serviceaccount:{{ include "falcon-kac.namespace" . }}:{{ .Values.serviceAccount.name }} > /dev/null
+        if [ $? -ne 0 ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ServiceAccount cannot get nodes"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ServiceAccount can get nodes"
+
+        kubectl auth can-i get pods --as=system:serviceaccount:{{ include "falcon-kac.namespace" . }}:{{ .Values.serviceAccount.name }} > /dev/null
+        if [ $? -ne 0 ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ServiceAccount cannot get pods"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ServiceAccount can get pods"
+
+        {{- if .Values.admissionControl.enabled }}
+        echo "Testing admission controller specific permissions..."
+        kubectl auth can-i get validatingwebhookconfigurations --as=system:serviceaccount:{{ include "falcon-kac.namespace" . }}:{{ .Values.serviceAccount.name }} > /dev/null
+        if [ $? -ne 0 ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ServiceAccount cannot get validatingwebhookconfigurations"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ServiceAccount can get validatingwebhookconfigurations"
+        {{- end }}
+
+        echo "[\033[0;32mOK\033[0m]: All RBAC permissions are correctly configured"
+        exit 0
+      securityContext:
+        runAsUser: 0
+        privileged: true
+        readOnlyRootFilesystem: false
+        allowPrivilegeEscalation: true
+  serviceAccountName: {{ .Values.serviceAccount.name }}
+  restartPolicy: Never
+{{- end -}}

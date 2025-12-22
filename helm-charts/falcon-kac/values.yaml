@@ -193,6 +193,11 @@ dnsPolicy:
 resourceQuota:
   pods: 2
 
+# Testing configuration for Helm tests
+testing:
+  # Enable/disable Helm tests
+  enabled: false
+
 # GLOBAL VALUES - for unified helm chart use only
 global:
   falcon:

@@ -1,0 +1,92 @@
+{{- if and .Values.testing.enabled .Values.admissionControl.enabled -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "falcon-kac.fullname" . }}-test-webhook-functionality"
+  namespace: {{ include "falcon-kac.namespace" . }}
+  labels:
+    {{- include "falcon-kac.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: kubectl
+      image: docker.io/bitnami/kubectl
+      command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Waiting 30 seconds to allow admission controller to be fully ready"
+        sleep 30
+
+        echo "Checking if ValidatingWebhookConfiguration is properly configured..."
+        WEBHOOK_CONFIG=$(kubectl get validatingwebhookconfiguration validating.{{ include "falcon-kac.webhookName" . }} -o name 2>/dev/null)
+        if [ -z "${WEBHOOK_CONFIG}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ValidatingWebhookConfiguration 'validating.{{ include "falcon-kac.webhookName" . }}' not found"
+            kubectl get validatingwebhookconfiguration
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ValidatingWebhookConfiguration found"
+
+        echo "Checking webhook service availability..."
+        {{- if .Values.domainName }}
+        SERVICE_ENDPOINT="{{ include "falcon-kac.name" . }}.{{ include "falcon-kac.namespace" . }}.svc.{{ .Values.domainName }}:443"
+        {{- else }}
+        SERVICE_ENDPOINT="webhook.{{ include "falcon-kac.namespace" . }}.svc.cluster.local:443"
+        {{- end }}
+
+        # Test webhook service connectivity
+        WEBHOOK_SERVICE=$(kubectl get service webhook -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${WEBHOOK_SERVICE}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Webhook service not found"
+            kubectl get services -n {{ include "falcon-kac.namespace" . }}
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Webhook service found"
+
+        echo "Creating test namespace to verify webhook is intercepting requests..."
+        # Create a test namespace that should trigger the webhook
+        kubectl create namespace falcon-kac-test-ns --dry-run=client -o yaml | kubectl apply -f -
+
+        echo "Creating test pod to verify admission controller is working..."
+        # Create a simple test pod to see if webhook processes it
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: falcon-kac-test-pod
+          namespace: falcon-kac-test-ns
+        spec:
+          containers:
+          - name: test
+            image: busybox:latest
+            command: ['sleep', '30']
+          restartPolicy: Never
+        EOF
+
+        echo "Waiting for test pod to be processed by admission controller..."
+        sleep 10
+
+        # Check if the pod was created (webhook should allow it but may have modified it)
+        TEST_POD=$(kubectl get pod falcon-kac-test-pod -n falcon-kac-test-ns -o name 2>/dev/null)
+        if [ -z "${TEST_POD}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Test pod was not created - admission controller may have rejected it"
+            kubectl describe pod falcon-kac-test-pod -n falcon-kac-test-ns || true
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Test pod was processed by admission controller"
+
+        echo "Cleaning up test resources..."
+        kubectl delete pod falcon-kac-test-pod -n falcon-kac-test-ns --ignore-not-found=true
+        kubectl delete namespace falcon-kac-test-ns --ignore-not-found=true
+
+        echo "[\033[0;32mOK\033[0m]: Admission controller webhook functionality test completed successfully"
+        exit 0
+      securityContext:
+        runAsUser: 0
+        privileged: true
+        readOnlyRootFilesystem: false
+        allowPrivilegeEscalation: true
+  serviceAccountName: {{ .Values.serviceAccount.name }}
+  restartPolicy: Never
+{{- end -}}

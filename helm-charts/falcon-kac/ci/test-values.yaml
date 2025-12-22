@@ -1,0 +1,38 @@
+# CI test values that enable testing functionality
+testing:
+  enabled: true
+
+# Basic configuration for testing
+falcon:
+  cid: "12345678901234567890123456789012-34"
+
+admissionControl:
+  enabled: true
+
+serviceAccount:
+  name: falcon-kac-sa
+
+# Test with minimal resource requirements
+falconClientResources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+falconWatcherResources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+falconAcResources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi

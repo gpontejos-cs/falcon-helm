@@ -1,0 +1,104 @@
+{{- if .Values.testing.enabled -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "falcon-kac.fullname" . }}-test-configuration"
+  namespace: {{ include "falcon-kac.namespace" . }}
+  labels:
+    {{- include "falcon-kac.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  containers:
+    - name: kubectl
+      image: docker.io/bitnami/kubectl
+      command:
+      - /bin/sh
+      - -c
+      - |
+        echo "Testing falcon-kac configuration and secrets..."
+
+        echo "Checking if ConfigMap exists..."
+        CM=$(kubectl get configmap {{ include "falcon-kac.fullname" . }}-config -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${CM}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: ConfigMap '{{ include "falcon-kac.fullname" . }}-config' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: ConfigMap exists"
+
+        echo "Checking if TLS Secret exists..."
+        TLS_SECRET=$(kubectl get secret {{ include "falcon-kac.name" . }}-tls -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${TLS_SECRET}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: TLS Secret '{{ include "falcon-kac.name" . }}-tls' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: TLS Secret exists"
+
+        echo "Verifying TLS Secret has required keys..."
+        TLS_CRT=$(kubectl get secret {{ include "falcon-kac.name" . }}-tls -n {{ include "falcon-kac.namespace" . }} -o jsonpath='{.data.tls\.crt}' 2>/dev/null)
+        TLS_KEY=$(kubectl get secret {{ include "falcon-kac.name" . }}-tls -n {{ include "falcon-kac.namespace" . }} -o jsonpath='{.data.tls\.key}' 2>/dev/null)
+        CA_CRT=$(kubectl get secret {{ include "falcon-kac.name" . }}-tls -n {{ include "falcon-kac.namespace" . }} -o jsonpath='{.data.ca\.crt}' 2>/dev/null)
+
+        if [ -z "${TLS_CRT}" ] || [ -z "${TLS_KEY}" ] || [ -z "${CA_CRT}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: TLS Secret missing required keys (tls.crt, tls.key, ca.crt)"
+            kubectl describe secret {{ include "falcon-kac.name" . }}-tls -n {{ include "falcon-kac.namespace" . }}
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: TLS Secret has all required keys"
+
+        {{- $falconSecretEnabled := include "falcon-kac.falconSecretEnabled" . | eq "true" }}
+        {{- if $falconSecretEnabled }}
+        {{- $falconSecretName := include "falcon-kac.falconSecretName" . }}
+        echo "Checking if Falcon Secret exists..."
+        FALCON_SECRET=$(kubectl get secret {{ $falconSecretName }} -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${FALCON_SECRET}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Falcon Secret '{{ $falconSecretName }}' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Falcon Secret exists"
+        {{- else }}
+        echo "[\033[0;33mSKIP\033[0m]: Falcon Secret not enabled, skipping secret verification"
+        {{- end }}
+
+        {{- $imagePullSecret := include "falcon-kac.imagePullSecret" . }}
+        {{- $registryConfigJson := include "falcon-kac.registryConfigJson" . }}
+        {{- if or $imagePullSecret $registryConfigJson }}
+        echo "Checking image pull secrets..."
+        {{- if $imagePullSecret }}
+        PULL_SECRET=$(kubectl get secret {{ $imagePullSecret }} -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${PULL_SECRET}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Image pull secret '{{ $imagePullSecret }}' not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Image pull secret exists"
+        {{- end }}
+        {{- if $registryConfigJson }}
+        REGISTRY_SECRET=$(kubectl get secret {{ include "falcon-kac.fullname" . }}-pull-secret -n {{ include "falcon-kac.namespace" . }} -o name 2>/dev/null)
+        if [ -z "${REGISTRY_SECRET}" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Registry config pull secret not found"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Registry config pull secret exists"
+        {{- end }}
+        {{- else }}
+        echo "[\033[0;33mSKIP\033[0m]: No image pull secrets configured"
+        {{- end }}
+
+        echo "Verifying deployment is using the correct configuration..."
+        DEPLOYMENT_CONFIG=$(kubectl get deployment {{ include "falcon-kac.name" . }} -n {{ include "falcon-kac.namespace" . }} -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}')
+        if [ "${DEPLOYMENT_CONFIG}" != "{{ include "falcon-kac.fullname" . }}-config" ]; then
+            echo "[\033[0;31mFAIL\033[0m]: Deployment not using correct ConfigMap. Expected: {{ include "falcon-kac.fullname" . }}-config, Got: ${DEPLOYMENT_CONFIG}"
+            exit 1
+        fi
+        echo "[\033[0;32mOK\033[0m]: Deployment is using correct ConfigMap"
+
+        echo "[\033[0;32mOK\033[0m]: All configuration and secrets are properly set up"
+        exit 0
+      securityContext:
+        runAsUser: 0
+        privileged: true
+        readOnlyRootFilesystem: false
+        allowPrivilegeEscalation: true
+  serviceAccountName: {{ .Values.serviceAccount.name }}
+  restartPolicy: Never
+{{- end -}}
