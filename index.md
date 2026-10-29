@@ -8,7 +8,7 @@ helm repo add gpontejos_cs https://gpontejos-cs.github.io/falcon-helm
 ```
 
 <br>
-### Install CrowdStrike Falcon Helm Chart
+### Install Greg's Forked CrowdStrike Falcon Helm Chart
 
 ```
 helm upgrade --install falcon-helm gpontejos_cs/falcon-sensor \
